@@ -684,6 +684,10 @@ public class AccelService extends Service
                     Log.v(TAG, "Recorded " 
                             + mTempForceList.size()
                             + " samples.");
+
+                    Log.v(TAG, "Last force value: " 
+                            + mTempForceList.get(mTempForceList.size() -
+                            1));
             		
             		mSensorManager.unregisterListener(mSensorListener, 
             				mSensorManager.getDefaultSensor(
