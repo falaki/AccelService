@@ -789,6 +789,20 @@ public class AccelService extends Service
     public void onDestroy()
     {
     	Log.i(TAG, "onDestroy");
+
+        Log.i(TAG, "Stopping the service");
+        mHandler.removeMessages(SLEEP_TIMER_MSG);
+        mHandler.removeMessages(READ_TIMER_MSG);
+        
+        mSensorManager.unregisterListener(mSensorListener, 
+           mSensorManager.getDefaultSensor(
+               Sensor.TYPE_ACCELEROMETER));
+        
+        
+        mSensorRunning = false;
+        mClientCount = 0;
+
+
     	super.onDestroy();
 
         unbindService(Log.SystemLogConnection);
@@ -835,7 +849,7 @@ public class AccelService extends Service
     		mSleepInterval = interval;
     	}
     	
-    	Log.i(TAG, "Sleepint interval changed to " + mSleepInterval);
+    	Log.i(TAG, "Sleeping interval changed to " + mSleepInterval);
     	
     	return mSleepInterval;
     }
