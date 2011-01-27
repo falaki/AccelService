@@ -69,6 +69,9 @@ public class AccelService extends Service
 
     /** Counter for the number of connected clients */
     private int mClientCount = 0;
+
+    /** Set if the service is running */
+    private boolean mIsRunning = false;
 	
 	
 	/** List of recorded force values */
@@ -605,13 +608,14 @@ public class AccelService extends Service
               
               mClientCount++;
 
-              if (mClientCount == 1)
+              if ((mClientCount == 1) && (!mIsRunning))
               {
                   Log.i(TAG, "Starting the service");
                   mHandler.sendMessageAtTime(
                          mHandler.obtainMessage(WARMUP_TIMER_MSG),
                          SystemClock.uptimeMillis() +
                          mSleepInterval);				 
+                  mIsRunning = true;
               }
               else
               {
@@ -626,12 +630,14 @@ public class AccelService extends Service
           {
               mClientCount--;
 
-              if (mClientCount <= 0)
+              if ((mClientCount <= 0) && (mIsRunning))
               {
                   Log.i(TAG, "Stopping the service");
+                  mIsRunning = false;
                   mHandler.removeMessages(SLEEP_TIMER_MSG);
                   mHandler.removeMessages(READ_TIMER_MSG);
-                  
+                  mHandler.removeMessages(WARMUP_TIMER_MSG);
+
                   mSensorManager.unregisterListener(mSensorListener, 
                      mSensorManager.getDefaultSensor(
                          Sensor.TYPE_ACCELEROMETER));
@@ -675,6 +681,14 @@ public class AccelService extends Service
         @Override
         public synchronized void handleMessage(Message msg)
         {
+            // Discard the message if the service is not 
+            // supposed to be running.
+            if (!mIsRunning)
+            {
+                Log.w(TAG, "Discarding internal message.");
+                return;
+            }
+
             if (msg.what == SLEEP_TIMER_MSG)
             {
             	if (mSensorRunning)
@@ -840,9 +854,9 @@ public class AccelService extends Service
      */
     private long changeSleepInterval(long interval)
     {
-    	if (interval < 10 * ONE_SECOND)
+    	if (interval < 5 * ONE_SECOND)
     	{
-    		mSleepInterval = ONE_MINUTE;
+    		mSleepInterval = 5 * ONE_SECOND;
     	}
     	else
     	{
