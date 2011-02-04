@@ -2,15 +2,19 @@ package edu.ucla.cens.accelservice;
 
 import edu.ucla.cens.systemlog.ISystemLog;
 import edu.ucla.cens.systemlog.Log;
-
+import edu.ucla.cens.systemsens.IPowerMonitor;
+import edu.ucla.cens.systemsens.IAdaptiveApplication;
 
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.SystemClock;
+import android.os.RemoteException;
 import android.hardware.SensorManager;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorEvent;
@@ -24,6 +28,10 @@ public class AccelService extends Service
 {
 	/** TAG string used for logging */
 	private static final String TAG = "AccelService";
+
+    private static final String APP_NAME = "AccelService";
+
+    private static final String ACCEL_UNIT_NAME = "Accel";
 	
 	/** Timer message types */
 	private static final int SLEEP_TIMER_MSG = 1;
@@ -31,10 +39,10 @@ public class AccelService extends Service
     private static final int WARMUP_TIMER_MSG = 3;
 	
 	/** Constant values used for easy time specification */
-	private static final long ONE_SECOND = 1000;
-	private static final long ONE_MINUTE = 60 * ONE_SECOND;
+	private static final int ONE_SECOND = 1000;
+	private static final int ONE_MINUTE = 60 * ONE_SECOND;
 
-    private static final long DEFAULT_WARMUP_INTERVAL = ONE_SECOND;
+    private static final int DEFAULT_WARMUP_INTERVAL = ONE_SECOND;
 
 
 	
@@ -51,6 +59,9 @@ public class AccelService extends Service
 
     /** Sensor warmup interval */
     private long mWarmupInterval = DEFAULT_WARMUP_INTERVAL;
+
+    /** Default power cycle interval */
+    private static final int DEFAULT_POWERCYCLE_HORIZON = 5 * ONE_MINUTE;
 	
 	/** Reading interval value. By default set to one second */
 	private long mReadInterval = ONE_SECOND;
@@ -88,13 +99,93 @@ public class AccelService extends Service
 	private List<Double> mLastListZ;
 	private List<Double> mTempListZ;
 
+    private AccelCounter mAccelCounter;
 	
 	 
 	/** The SensorManager object */
 	private SensorManager mSensorManager;
 	
-	private static int mRegime = REGIME_RELAXED;
 	
+    /** Power monitor stuff */
+    private IPowerMonitor mPowerMonitor;
+    private boolean mPowerMonitorConnected = false;
+
+
+    private final IAdaptiveApplication mAdaptiveControl
+        = new IAdaptiveApplication.Stub()
+    {
+
+        public String getName()
+        {
+            return APP_NAME;
+        }
+
+        public List<String> identifyList()
+        {
+            ArrayList<String> unitNames = new ArrayList<String>(1);
+            unitNames.add(ACCEL_UNIT_NAME);
+
+            return unitNames;
+        }
+
+        public List<Double> getWork()
+        {
+            ArrayList<Double> totalWork = new ArrayList<Double>(1);
+
+            totalWork.add(mAccelCounter.getCount());
+
+            return totalWork;
+        }
+
+        public void setWorkLimit(List workLimit)
+        {
+            double accelLimit = (Double) workLimit.get(0);
+
+            mAccelCounter.setLimit(accelLimit);
+        }
+
+
+    };
+
+    private ServiceConnection mPowerMonitorConnection
+        = new ServiceConnection()
+    {
+        public void onServiceConnected(ComponentName className,
+                IBinder service)
+        {
+            mPowerMonitor = IPowerMonitor.Stub.asInterface(service);
+            try
+            {
+                mPowerMonitor.register(mAdaptiveControl,
+                        DEFAULT_POWERCYCLE_HORIZON);
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not register AdaptivePower object",
+                        re);
+            }
+            mPowerMonitorConnected = true;
+        }
+
+        public void onServiceDisconnected(ComponentName className)
+        {
+            try
+            {
+                mPowerMonitor.unregister(mAdaptiveControl);
+            }
+            catch (RemoteException re)
+            {
+                Log.e(TAG, "Could not unregister AdaptivePower object",
+                        re);
+            }
+            mPowerMonitor = null;
+            mPowerMonitorConnected = false;
+        }
+
+    };
+
+
+
 	
 	
 	/**
@@ -118,6 +209,8 @@ public class AccelService extends Service
 		 */
 		public void onSensorChanged(SensorEvent se) 
 		{
+            mAccelCounter.count();
+
             if (mRecordSensor)
             {
                 if (mJustStarted)
@@ -195,199 +288,7 @@ public class AccelService extends Service
 		}
 	};
 	
-	private final IAccelServiceControl.Stub mControlBinder = 
-        new IAccelServiceControl.Stub()
-	{
-		
-		/**
-		 * Sets the current operational regime.
-		 * REGIME_RELAXED (0x00000000) is the default regime 
-         * where the service can
-		 * take suggestions from its clients.
-		 * Other integer values indicate next levels of power 
-         * consumption limitations
-		 *
-		 * @param		regime		new power consumption regime
-		 */ 
-		public void setOperationRegime(int regime)
-		{
-            if (mRegime != regime)
-            {
-                String regStr = "controlled";
-                if (regime == REGIME_RELAXED)
-                    regStr = "relaxed";
 
-                Log.i(TAG, "Operating regime changed to " + regStr);
-            }
-
-			mRegime = regime;
-			
-			if (regime == REGIME_RELAXED)
-			{
-				resetToDefault();
-			}
-		}
-		
-		
-		/**
-		 * Increases the sleep interval between accelerometer 
-         * sampling events.
-		 *
-		 * @return 					the new interval after the increase
-		 *
-		 */
-		public long increaseInterval()
-		{
-            setOperationRegime(REGIME_CONTROLLED);
-			return changeSleepInterval(mSleepInterval * 2);
-			
-		}
-		
-		/**
-		 * Decreases the sleep interval between accelerometer 
-         * sampling events.
-		 * 
-		 * @return 					the new interval after the decrease
-		 */	
-		public long decreaseInterval()
-		{
-            setOperationRegime(REGIME_CONTROLLED);
-			return changeSleepInterval(mSleepInterval / 2);
-		}
-
-		/**
-		 * Sets the sleep interval
-		 * 
-		 * @param		interval	the value to be set	
-		 * @return 					the new interval after the change
-		 */	
-		public long setInterval(long interval)
-		{
-            setOperationRegime(REGIME_CONTROLLED);
-			return changeSleepInterval(interval);
-		}
-
-		/**
-		 * Returns the current sleep interval.
-		 * 
-		 * @return 					the new interval after the change
-		 */	
-		public long getInterval()
-		{
-			
-			return mSleepInterval;
-		}
-		
-		/**
-		 * Increases the accelerometer sampling rate.
-		 * Possible values are:
-		 * SENSOR_DELAY_FASTEST, SENSOR_DELAY_GAME, 
-         * SENSOR_DELAY_NORMA, SENSOR_DELAY_UI
-		 *
-		 * @return 					the actual rate after the increase
-		 *
-		 */	
-		public int increaseRate()
-		{
-			mRegime = REGIME_CONTROLLED;
-			int newRate;
-			
-			switch (mRate)
-			{
-				case SensorManager.SENSOR_DELAY_NORMAL:
-					newRate = SensorManager.SENSOR_DELAY_UI; break;
-				case SensorManager.SENSOR_DELAY_UI:
-					newRate = SensorManager.SENSOR_DELAY_GAME; break;
-				case SensorManager.SENSOR_DELAY_GAME:
-					newRate = SensorManager.SENSOR_DELAY_FASTEST; break;
-				default:
-					newRate = SensorManager.SENSOR_DELAY_FASTEST; break;
-			}
-			
-			return changeRate(newRate);
-			
-		}
-		
-		/**
-		 * Decrease the accelerometer sampling rate.
-		 * Possible values are:
-		 * SENSOR_DELAY_FASTEST, SENSOR_DELAY_GAME, 
-         * SENSOR_DELAY_NORMA, SENSOR_DELAY_UI
-		 *
-		 * @return 					the actual rate after the decrease
-		 *
-		 */	
-		public int decreaseRate()
-		{
-			mRegime = REGIME_CONTROLLED;
-			int newRate;
-			
-			switch (mRate)
-			{
-				case SensorManager.SENSOR_DELAY_UI:
-					newRate = SensorManager.SENSOR_DELAY_NORMAL; break;
-				case SensorManager.SENSOR_DELAY_GAME:
-					newRate = SensorManager.SENSOR_DELAY_UI; break;
-				case SensorManager.SENSOR_DELAY_FASTEST:
-					newRate = SensorManager.SENSOR_DELAY_GAME; break;
-				default:
-					newRate = SensorManager.SENSOR_DELAY_NORMAL; break;
-			}
-			
-			return changeRate(newRate);			
-		}
-		
-		/**
-		 * Set the rate of accelerometer sampling. 
-		 * Possible values are:
-		 * SENSOR_DELAY_FASTEST, SENSOR_DELAY_GAME, 
-         * SENSOR_DELAY_NORMA, SENSOR_DELAY_UI
-		 * 
-		 * @param 		rate		rate of sensor reading
-		 * @return 					the actual rate that was set 
-		 * 
-		 */
-		public int setRate(int rate)
-		{
-            setOperationRegime(REGIME_CONTROLLED);
-			return changeRate(rate);
-		}
-		
-		/**
-		 * Returns the current accelerometer sampling rate.
-		 * 
-		 * @param 		rate		rate of sensor reading
-		 */
-		public int getRate()
-		{
-			return mRate;
-		}
-
-		
-		/**
-		 * Sets the power consumption.
-		 * 
-		 * @param		power		the power consumption level
-		 */
-		public void setPower(int power)
-		{
-            setOperationRegime(REGIME_CONTROLLED);
-			//TODO: Not implemented yet.
-		}
-		
-		/**
-		 * Returns the current power consumption level.
-		 * 
-		 * @return					the new power consumption level
-		 */	
-		public int getPower()
-		{
-			//TODO: Not implemented yet.
-			return 0;
-		}
-
-	};
-	
 	
 	/*
 	 * Binder object for the service. 
@@ -409,10 +310,7 @@ public class AccelService extends Service
 		public int suggestRate(int rate)
 		{
             Log.v(TAG, "Got rate suggestion of " + rate);
-			if (mRegime == REGIME_RELAXED)
-				return changeRate(rate);
-			else
-				return mRate;
+            return changeRate(rate);
 		}
 		
 		/**
@@ -464,10 +362,7 @@ public class AccelService extends Service
 		public long suggestInterval(long interval)
 		{
             Log.v(TAG, "Got interval suggestion of " + interval );
-			if (mRegime == REGIME_RELAXED)
-				return changeSleepInterval(interval);
-			else
-				return mSleepInterval;
+            return changeSleepInterval(interval);
 		}
 		
 		/**
@@ -662,11 +557,6 @@ public class AccelService extends Service
         {
             return mBinder;
         }
-        if (IAccelServiceControl.class.getName().equals(
-                    intent.getAction())) 
-        {
-            return mControlBinder;
-        }
         
 		return null;
 	}
@@ -726,15 +616,22 @@ public class AccelService extends Service
             {
             	if (!mSensorRunning)
             	{
-            		// Debug
             		Log.v(TAG, "Starting to warm up the sensor for "
                             + mWarmupInterval
                             + " milliseconds");
 
-            		mSensorManager.registerListener(mSensorListener, 
-                    		mSensorManager.getDefaultSensor(
-                                Sensor.TYPE_ACCELEROMETER), 
-                    		mRate);
+                    if (mAccelCounter.hasBudget())
+                    {
+                        mSensorManager.registerListener(mSensorListener, 
+                                mSensorManager.getDefaultSensor(
+                                    Sensor.TYPE_ACCELEROMETER), 
+                                mRate);
+                    }
+                    else
+                    {
+                        Log.i(TAG, "Ran out of budget. Did not turn" +
+                                "on the sensor");
+                    }
 
                     mHandler.sendMessageAtTime(
                             mHandler.obtainMessage(READ_TIMER_MSG),
@@ -780,9 +677,15 @@ public class AccelService extends Service
     @Override
     public void onCreate() {
         super.onCreate();
+
+        Log.setAppName(APP_NAME);
         bindService(new Intent(ISystemLog.class.getName()),
                 Log.SystemLogConnection, Context.BIND_AUTO_CREATE);
      
+        bindService(new Intent(IPowerMonitor.class.getName()),
+                mPowerMonitorConnection, Context.BIND_AUTO_CREATE);
+ 
+
         Log.i(TAG, "onCreate");
      
         resetToDefault();
@@ -790,6 +693,7 @@ public class AccelService extends Service
                 Context.SENSOR_SERVICE);
         
 		
+        mAccelCounter = new AccelCounter();
         
 
     }
@@ -902,5 +806,57 @@ public class AccelService extends Service
 		
 		return mRate;
     }
+
+
+    class AccelCounter
+    {
+        private double mTotal;
+        private double mCurTotal;
+        private double mLimit;
+
+        public AccelCounter()
+        {
+            mTotal = mCurTotal = 0.0;
+            mLimit = Double.NaN;
+        }
+
+        public boolean hasBudget()
+        {
+            if ( Double.isNaN(mLimit) || (mCurTotal < mLimit))
+            {
+                return true;
+            }
+            else if (!Double.isNaN(mLimit) && (mCurTotal >= mLimit))
+            {
+                return false;
+            }
+            return true;
+        }
+
+        public boolean count()
+        {
+            if (hasBudget())
+            {
+                mTotal += 1;
+                mCurTotal += 1;
+                return true;
+            }
+            else
+                return false;
+        }
+
+        public void setLimit(double workLimit)
+        {
+            mLimit = workLimit;
+            mCurTotal = 0.0;
+        }
+
+        public double getCount()
+        {
+            return mTotal;
+        }
+
+    }
+
     
 }
