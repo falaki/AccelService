@@ -6,6 +6,8 @@ import edu.ucla.cens.systemsens.IPowerMonitor;
 import edu.ucla.cens.systemsens.IAdaptiveApplication;
 
 import android.app.Service;
+import android.app.PendingIntent;
+import android.app.AlarmManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ComponentName;
@@ -15,6 +17,7 @@ import android.os.IBinder;
 import android.os.Message;
 import android.os.SystemClock;
 import android.os.RemoteException;
+import android.os.PowerManager;
 import android.hardware.SensorManager;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorEvent;
@@ -36,7 +39,10 @@ public class AccelService extends Service
 	/** Timer message types */
 	private static final int SLEEP_TIMER_MSG = 1;
 	private static final int READ_TIMER_MSG = 2;
-    private static final int WARMUP_TIMER_MSG = 3;
+    //private static final int WARMUP_TIMER_MSG = 3;
+
+    /** Alarm intent action */
+    private static final String ACCEL_ALARM_ACTION = "accel_alarm";
 	
 	/** Constant values used for easy time specification */
 	private static final int ONE_SECOND = 1000;
@@ -101,6 +107,14 @@ public class AccelService extends Service
 
     private AccelCounter mAccelCounter;
 	
+
+    /** The alarm manager object */
+    private AlarmManager mAlarmManager;
+
+    private PendingIntent mAccelSender;
+
+    /** The partial wakelock object */
+    private PowerManager.WakeLock mCpuLock;
 	 
 	/** The SensorManager object */
 	private SensorManager mSensorManager;
@@ -503,13 +517,23 @@ public class AccelService extends Service
               
               mClientCount++;
 
+              Log.i(TAG, "Client count is " + mClientCount);
+
               if ((mClientCount == 1) && (!mIsRunning))
               {
                   Log.i(TAG, "Starting the service");
+
+                  mAlarmManager.setRepeating(
+                          AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                          SystemClock.elapsedRealtime(),
+                          mSleepInterval, 
+                          mAccelSender);
+                  /*
                   mHandler.sendMessageAtTime(
                          mHandler.obtainMessage(WARMUP_TIMER_MSG),
                          SystemClock.uptimeMillis() +
                          mSleepInterval);				 
+                 */
                   mIsRunning = true;
               }
               else
@@ -525,13 +549,16 @@ public class AccelService extends Service
           {
               mClientCount--;
 
+              Log.i(TAG, "Client count is " + mClientCount);
+
               if ((mClientCount <= 0) && (mIsRunning))
               {
                   Log.i(TAG, "Stopping the service");
                   mIsRunning = false;
+                  mAlarmManager.cancel(mAccelSender);
                   mHandler.removeMessages(SLEEP_TIMER_MSG);
                   mHandler.removeMessages(READ_TIMER_MSG);
-                  mHandler.removeMessages(WARMUP_TIMER_MSG);
+                  //mHandler.removeMessages(WARMUP_TIMER_MSG);
 
                   mSensorManager.unregisterListener(mSensorListener, 
                      mSensorManager.getDefaultSensor(
@@ -540,7 +567,11 @@ public class AccelService extends Service
                   
                  mSensorRunning = false;
                  mClientCount = 0;
+                 mIsRunning = false;
               }
+
+              if (mClientCount < 0)
+                  mClientCount = 0;
           }
  
 	};
@@ -576,6 +607,7 @@ public class AccelService extends Service
             if (!mIsRunning)
             {
                 Log.w(TAG, "Discarding internal message.");
+                mAlarmManager.cancel(mAccelSender);
                 return;
             }
 
@@ -589,10 +621,7 @@ public class AccelService extends Service
                             + mTempForceList.size()
                             + " samples.");
 
-                    Log.v(TAG, "Last force value: " 
-                            + mTempForceList.get(mTempForceList.size() -
-                            1));
-            		
+           		
             		mSensorManager.unregisterListener(mSensorListener, 
             				mSensorManager.getDefaultSensor(
                                 Sensor.TYPE_ACCELEROMETER));
@@ -606,12 +635,18 @@ public class AccelService extends Service
         			mLastListY = mTempListY;
         			mLastListZ = mTempListZ;
 
+
+                    Log.v(TAG, "Last force value: " 
+                            + mLastForceList.get(
+                                mLastForceList.size() - 1));
+ 
+
             	}
 
-                mHandler.sendMessageAtTime(
-                		mHandler.obtainMessage(WARMUP_TIMER_MSG),
-                		SystemClock.uptimeMillis() + mSleepInterval);
+                mCpuLock.release();
+
             }
+            /* Replaced by the Alarm mechanism 
             else if (msg.what == WARMUP_TIMER_MSG)
             {
             	if (!mSensorRunning)
@@ -644,6 +679,7 @@ public class AccelService extends Service
                 mRecordSensor = false;
 
             }
+            */
             else if (msg.what == READ_TIMER_MSG)
             {             
                 // Debug
@@ -659,9 +695,75 @@ public class AccelService extends Service
     };
 
 
+    /**
+      * Triggers the sensor reading cycle.
+      * Starts the sensor and also sends a message for the
+      * warmup interval.
+      */
+    private void sensorCycle()
+    {
+
+        if (!mSensorRunning)
+        {
+            Log.v(TAG, "Starting to warm up the sensor for "
+                    + mWarmupInterval
+                    + " milliseconds");
+
+            if (mAccelCounter.hasBudget())
+            {
+                mSensorManager.registerListener(mSensorListener, 
+                        mSensorManager.getDefaultSensor(
+                            Sensor.TYPE_ACCELEROMETER), 
+                        mRate);
+
+                mHandler.sendMessageAtTime(
+                        mHandler.obtainMessage(READ_TIMER_MSG),
+                        SystemClock.uptimeMillis() + mWarmupInterval);
+
+                mSensorRunning = true;
+                mRecordSensor = false;
+
+            }
+            else
+            {
+                Log.i(TAG, "Ran out of budget. Did not turn " +
+                        "on the sensor.");
+            }
+
+        }
+
+
+    }
+
+
     @Override
     public void onStart(Intent intent, int startId)
     {
+        if (!mPowerMonitorConnected)
+        {
+            Log.i(TAG, "Rebinding to PowerMonitor");
+            bindService(new Intent(IPowerMonitor.class.getName()),
+                    mPowerMonitorConnection, Context.BIND_AUTO_CREATE);
+     
+        }
+
+        if (intent != null)
+        {
+            String action = intent.getAction();
+
+            if (action != null)
+            {
+                Log.i(TAG, "Received action: " + action);
+
+                if (action.equals(ACCEL_ALARM_ACTION))
+                {
+                    mCpuLock.acquire(); // Released after sensor
+                                        // reading is over
+
+                    sensorCycle();
+                }
+            }
+        }
         super.onStart(intent, startId);
         Log.i(TAG, "onStart");
     }
@@ -694,6 +796,22 @@ public class AccelService extends Service
         
 		
         mAccelCounter = new AccelCounter();
+
+        PowerManager pm = (PowerManager) getSystemService(
+                Context.POWER_SERVICE);
+        mCpuLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
+                APP_NAME);
+
+
+        mAlarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
+
+        // Repeating alarm for Accel dutycycling
+        Intent accelAlarmIntent = new Intent(AccelService.this,
+                AccelService.class);
+        accelAlarmIntent.setAction(ACCEL_ALARM_ACTION);
+        mAccelSender = PendingIntent.getService(AccelService.this, 0,
+                accelAlarmIntent, 0);
+
         
 
     }
@@ -709,6 +827,7 @@ public class AccelService extends Service
     	Log.i(TAG, "onDestroy");
 
         Log.i(TAG, "Stopping the service");
+        mAlarmManager.cancel(mAccelSender);
         mHandler.removeMessages(SLEEP_TIMER_MSG);
         mHandler.removeMessages(READ_TIMER_MSG);
         
@@ -768,6 +887,17 @@ public class AccelService extends Service
     	}
     	
     	Log.i(TAG, "Sleeping interval changed to " + mSleepInterval);
+
+        if (mIsRunning)
+        {
+            mAlarmManager.cancel(mAccelSender);
+            mAlarmManager.setRepeating(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime(),
+                mSleepInterval, 
+                mAccelSender);
+        }
+
     	
     	return mSleepInterval;
     }
