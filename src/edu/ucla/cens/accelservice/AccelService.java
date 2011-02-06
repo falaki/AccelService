@@ -643,7 +643,8 @@ public class AccelService extends Service
 
             	}
 
-                mCpuLock.release();
+                if (mCpuLock.isHeld())
+                    mCpuLock.release();
 
             }
             /* Replaced by the Alarm mechanism 
@@ -757,8 +758,9 @@ public class AccelService extends Service
 
                 if (action.equals(ACCEL_ALARM_ACTION))
                 {
-                    mCpuLock.acquire(); // Released after sensor
-                                        // reading is over
+                    if (!mCpuLock.isHeld())
+                        mCpuLock.acquire(); // Released after sensor
+                                            // reading is over
 
                     sensorCycle();
                 }
@@ -801,6 +803,7 @@ public class AccelService extends Service
                 Context.POWER_SERVICE);
         mCpuLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
                 APP_NAME);
+        mCpuLock.setReferenceCounted(false);
 
 
         mAlarmManager = (AlarmManager) getSystemService(ALARM_SERVICE);
