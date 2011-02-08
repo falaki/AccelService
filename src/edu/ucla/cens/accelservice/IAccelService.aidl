@@ -135,7 +135,7 @@ interface IAccelService
 	   * @return 			    true if Force mean is greater than
 	   *                        threshold
 	   */
-	  boolean significantForce(double threshold);
+	  //boolean significantForce(double threshold);
 
 
 	  

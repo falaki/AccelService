@@ -475,6 +475,7 @@ public class AccelService extends Service
            * @return                true if Force mean is *
            *            greater than threshold
            */
+          /*
           public boolean significantForce(double threshold)
           {
               double mean, sum = 0.0;
@@ -495,6 +496,7 @@ public class AccelService extends Service
                   return false;
 
           }
+          */
 
 		  
 		  /**
