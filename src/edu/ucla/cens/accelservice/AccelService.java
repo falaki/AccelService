@@ -25,6 +25,7 @@ import android.hardware.Sensor;
 
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Hashtable;
 
 
 public class AccelService extends Service
@@ -48,7 +49,13 @@ public class AccelService extends Service
 	private static final int ONE_SECOND = 1000;
 	private static final int ONE_MINUTE = 60 * ONE_SECOND;
 
-    private static final int DEFAULT_WARMUP_INTERVAL = ONE_SECOND;
+    /** Default operation values */
+    private static final long DEFAULT_WARMUP_INTERVAL = ONE_SECOND;
+    private static final long DEFAULT_READ_INTERVAL = ONE_SECOND;
+    private static final long DEFAULT_SLEEP_INTERVAL = ONE_MINUTE;
+    private static final int DEFAULT_RATE = 
+        SensorManager.SENSOR_DELAY_GAME;
+    private static final int DEFAULT_POWERCYCLE_HORIZON = 5 * ONE_MINUTE;
 
 
 	
@@ -58,19 +65,18 @@ public class AccelService extends Service
 
 	
 	/** Sensor reading rate. Default rate is set to GAME */
-	private int mRate = SensorManager.SENSOR_DELAY_GAME;
+	private int mRate = DEFAULT_RATE;
 	
 	/** Sleep interval value. By default set to one minutes */
-	private long mSleepInterval = ONE_MINUTE;
+	private long mSleepInterval = DEFAULT_SLEEP_INTERVAL;
 
     /** Sensor warmup interval */
     private long mWarmupInterval = DEFAULT_WARMUP_INTERVAL;
 
-    /** Default power cycle interval */
-    private static final int DEFAULT_POWERCYCLE_HORIZON = 5 * ONE_MINUTE;
-	
 	/** Reading interval value. By default set to one second */
-	private long mReadInterval = ONE_SECOND;
+	private long mReadInterval = DEFAULT_READ_INTERVAL;
+
+
 	
 	/** Boolean variable used to re-initialize the recorded Lists */
 	private boolean mJustStarted = true;
@@ -84,11 +90,12 @@ public class AccelService extends Service
 	/** Latest recorded time-stamp */
 	private long mLastTS;
 
-    /** Counter for the number of connected clients */
-    private int mClientCount = 0;
 
     /** Set if the service is running */
     private boolean mIsRunning = false;
+
+    /** Table of client names and correspondig information */
+    private Hashtable<String, ClientInfo> mClientsMap;
 	
 	
 	/** List of recorded force values */
@@ -262,10 +269,6 @@ public class AccelService extends Service
                 mTempListY.add(y);
                 mTempListZ.add(z);
 
-                /* Debug
-                Log.i(TAG, "Recorded the " + mTempForceList.size() 
-                        + "th data point");
-                */
             }
 			
 		}
@@ -312,7 +315,8 @@ public class AccelService extends Service
 
 		/**
 		 * Set the rate of accelerometer sampling. This is only a 
-		 * suggestion and the service may choose a lower rate to save power.
+		 * suggestion and the service may choose a lower rate 
+         * to save power.
 		 * Possible values are:
 		 * SENSOR_DELAY_FASTEST, SENSOR_DELAY_GAME, 
          * SENSOR_DELAY_NORMA, SENSOR_DELAY_UI
@@ -321,10 +325,26 @@ public class AccelService extends Service
 		 * @return 			the actual rate that was set
 		 * 
 		 */
-		public int suggestRate(int rate)
+		public int suggestRate(String callerName, int rate)
 		{
-            Log.v(TAG, "Got rate suggestion of " + rate);
-            return changeRate(rate);
+            if (callerName == null)
+                return -1;
+
+            if (mClientsMap.containsKey(callerName))
+            {
+                mClientsMap.get(callerName).setRate(rate);
+                Log.v(TAG, "Got rate suggestion of " + rate
+                        + " from " + callerName);
+            }
+            else
+            {
+                Log.i(TAG, "Client " + callerName + 
+                        " not recognized. Adding it.");
+                mClientsMap.put(callerName, new ClientInfo());
+                mClientsMap.get(callerName).setRate(rate);
+            }
+
+            return adjustRate();
 		}
 		
 		/**
@@ -334,12 +354,27 @@ public class AccelService extends Service
 		 * @param 	length		length of the interval for sensor 
          *                      reading in milli-seconds
 		 */
-		public long setReadingLength(long length)
+		public long setReadingLength(String callerName, long length)
 		{
-            Log.v(TAG, "Reading length set to " + length);
-			mReadInterval = length;
 
-            return mReadInterval;
+            if (callerName == null)
+                return -1;
+
+            if (mClientsMap.containsKey(callerName))
+            {
+                mClientsMap.get(callerName).setReadInterval(length);
+                Log.v(TAG, "Read length set to " 
+                        + length + " by " + callerName);
+            }
+            else
+            {
+                Log.i(TAG, "Client " + callerName + 
+                        " not recognized. Adding it.");
+                mClientsMap.put(callerName, new ClientInfo());
+                mClientsMap.get(callerName).setReadInterval(length);
+            }
+
+            return adjustReadInterval();
 		}
 
 
@@ -350,17 +385,30 @@ public class AccelService extends Service
          * @param   length      length of the warm-up interval for
          *                      preparing the accelerometer
          */
-        public long setWarmupLength(long length)
+        public long setWarmupLength(String callerName, long length)
         {
-            if (length > 0)
-                mWarmupInterval = length;
+
+            if (callerName == null)
+                return -1;
+
+            if (mClientsMap.containsKey(callerName))
+            {
+                mClientsMap.get(callerName).setWarmupInterval(length);
+                Log.v(TAG, "Warmup interval set to " 
+                        + length + " by " + callerName);
+
+            }
             else
-                mWarmupInterval = DEFAULT_WARMUP_INTERVAL;
+            {
+                Log.i(TAG, "Client " + callerName + 
+                        " not recognized. Adding it.");
+                mClientsMap.put(callerName, new ClientInfo());
+                mClientsMap.get(callerName).setWarmupInterval(length);
+            }
 
 
-            Log.v(TAG, "Warmup length set to " + mWarmupInterval);
 
-            return mWarmupInterval;
+            return adjustWarmupInterval();
         }
 		
 		/**
@@ -373,10 +421,29 @@ public class AccelService extends Service
 		 * @param	interval	suggested length of off interval 
                                 in milli-seconds
 		 */
-		public long suggestInterval(long interval)
+		public long suggestInterval(String callerName, long interval)
 		{
-            Log.v(TAG, "Got interval suggestion of " + interval );
-            return changeSleepInterval(interval);
+            if (callerName == null)
+                return -1;
+
+            if (mClientsMap.containsKey(callerName))
+            {
+                mClientsMap.get(callerName).setSleepInterval(interval);
+                Log.v(TAG, "Got interval suggestion of " 
+                        + interval + " from " + callerName);
+
+            }
+            else
+            {
+
+                Log.i(TAG, "Client " + callerName + 
+                        " not recognized. Adding it.");
+                mClientsMap.put(callerName, new ClientInfo());
+                mClientsMap.get(callerName).setSleepInterval(interval);
+            }
+
+
+            return adjustSleepInterval();
 		}
 		
 		/**
@@ -467,37 +534,6 @@ public class AccelService extends Service
 		 }
 
 
-          /**
-           * Returns true if the mean of last Force Values is greater
-           * than the threshold.
-           *
-           * @param     threshold   threshold value
-           * @return                true if Force mean is *
-           *            greater than threshold
-           */
-          /*
-          public boolean significantForce(double threshold)
-          {
-              double mean, sum = 0.0;
-
-              if (mLastForceList == null)
-                  return true;
-
-              for (double force : mLastForceList)
-              {
-                  sum += force;
-              }
-
-              mean = sum/mLastForceList.size();
-
-              if (mean > threshold)
-                  return true;
-              else 
-                  return false;
-
-          }
-          */
-
 		  
 		  /**
 		   * Returns the time-stamp of the last recorded value.
@@ -514,14 +550,22 @@ public class AccelService extends Service
           /**
            * Starts the accelerometer service.
            */
-          public void start()
+          public void start(String callerName)
           {
               
-              mClientCount++;
+              if (callerName == null)
+                  return;
 
-              Log.i(TAG, "Client count is " + mClientCount);
+              Log.i(TAG, "Received start() from " 
+                      + callerName);
 
-              if ((mClientCount == 1) && (!mIsRunning))
+              if (!mClientsMap.containsKey(callerName))
+                  mClientsMap.put(callerName, new ClientInfo());
+
+              int clientCount = mClientsMap.size();
+
+
+              if ((clientCount == 1) && (!mIsRunning))
               {
                   Log.i(TAG, "Starting the service");
 
@@ -530,12 +574,6 @@ public class AccelService extends Service
                           SystemClock.elapsedRealtime(),
                           mSleepInterval, 
                           mAccelSender);
-                  /*
-                  mHandler.sendMessageAtTime(
-                         mHandler.obtainMessage(WARMUP_TIMER_MSG),
-                         SystemClock.uptimeMillis() +
-                         mSleepInterval);				 
-                 */
                   mIsRunning = true;
               }
               else
@@ -547,20 +585,32 @@ public class AccelService extends Service
           /**
           * Stops the accelerometer service to save maximum power.
           */
-          public void stop()
+          public void stop(String callerName)
           {
-              mClientCount--;
 
-              Log.i(TAG, "Client count is " + mClientCount);
+              if (callerName == null)
+                  return;
 
-              if ((mClientCount <= 0) && (mIsRunning))
+              Log.i(TAG, "Received stop() from " 
+                      + callerName);
+
+
+              if (mClientsMap.containsKey(callerName))
+                  mClientsMap.remove(callerName);
+              else
+                  return;
+
+              int clientCount = mClientsMap.size();
+
+              Log.i(TAG, "Client count is " + clientCount);
+
+              if ((clientCount == 0) && (mIsRunning))
               {
                   Log.i(TAG, "Stopping the service");
                   mIsRunning = false;
                   mAlarmManager.cancel(mAccelSender);
                   mHandler.removeMessages(SLEEP_TIMER_MSG);
                   mHandler.removeMessages(READ_TIMER_MSG);
-                  //mHandler.removeMessages(WARMUP_TIMER_MSG);
 
                   mSensorManager.unregisterListener(mSensorListener, 
                      mSensorManager.getDefaultSensor(
@@ -568,12 +618,17 @@ public class AccelService extends Service
                  
                   
                  mSensorRunning = false;
-                 mClientCount = 0;
                  mIsRunning = false;
               }
+              else
+              {
+                  Log.i(TAG, "Still need to continue running.");
+                  adjustRate();
+                  adjustSleepInterval();
+                  adjustWarmupInterval();
+                  adjustReadInterval();
+              }
 
-              if (mClientCount < 0)
-                  mClientCount = 0;
           }
  
 	};
@@ -686,7 +741,8 @@ public class AccelService extends Service
             else if (msg.what == READ_TIMER_MSG)
             {             
                 // Debug
-                Log.v(TAG, "Recording the sensor");
+                Log.v(TAG, "Recording the sensor for "
+                        + mReadInterval + " milliseconds");
             		
                 mJustStarted = true; 
                 mRecordSensor = true;
@@ -775,7 +831,8 @@ public class AccelService extends Service
     /*
      * Create and initialize the service object.
      * 
-     * We first bind to SystemLog to send all logging messages through that.
+     * We first bind to SystemLog to send all logging messages 
+     * through that.
      * After initializing the SensorManager object as self-message is sent
      * to get things started.
      * @see android.app.Service#onCreate()
@@ -793,6 +850,8 @@ public class AccelService extends Service
  
 
         Log.i(TAG, "onCreate");
+
+        mClientsMap = new Hashtable<String, ClientInfo>();
      
         resetToDefault();
         mSensorManager = (SensorManager) getSystemService(
@@ -842,7 +901,6 @@ public class AccelService extends Service
         
         
         mSensorRunning = false;
-        mClientCount = 0;
 
 
     	super.onDestroy();
@@ -861,16 +919,39 @@ public class AccelService extends Service
     {
         Log.i(TAG, "Resetting variables to default");
     	/** Sensor reading rate. Default rate is set to GAME */
-    	mRate = SensorManager.SENSOR_DELAY_GAME;
+    	mRate = DEFAULT_RATE;
     	
     	/** Sleep interval value. By default set to one minutes */
-    	mSleepInterval = ONE_MINUTE;
+    	mSleepInterval = DEFAULT_SLEEP_INTERVAL;
     	
     	/** Reading interval value. By default set to one second */
-    	mReadInterval = ONE_SECOND;
+    	mReadInterval = DEFAULT_READ_INTERVAL;
+
+        mWarmupInterval = DEFAULT_WARMUP_INTERVAL;
+
+
+        mLastForceList = null;
+        mLastListX = null;
+        mLastListY = null;
+        mLastListZ = null;
+
+
     	
     }
-    
+
+
+    /*
+     * Returns the greates common devisor.
+     */
+    private long gcd(long a, long b) 
+    {
+        if (b==0) 
+            return a;
+        else
+            return gcd(b, a % b);
+    }
+
+  
     /*
      * Used internally to modify sleep interval.
      * For now does nothing but applying the change. But in future will 
@@ -880,18 +961,21 @@ public class AccelService extends Service
      * @return						final applied value
      * 
      */
-    private long changeSleepInterval(long interval)
+    private long adjustSleepInterval()
     {
-    	if (interval < 5 * ONE_SECOND)
-    	{
-    		mSleepInterval = 5 * ONE_SECOND;
-    	}
-    	else
-    	{
-    		mSleepInterval = interval;
-    	}
-    	
-    	Log.i(TAG, "Sleeping interval changed to " + mSleepInterval);
+        long interval, curInterval = mSleepInterval;
+
+        for (ClientInfo client : mClientsMap.values())
+        {
+            interval = client.sleepInterval;
+            curInterval = gcd(curInterval, interval);
+        }
+
+        if (mSleepInterval != curInterval)
+        {
+            mSleepInterval = curInterval;
+            Log.i(TAG, "Sleeping interval changed to " + mSleepInterval);
+        }
 
         if (mIsRunning)
         {
@@ -906,6 +990,47 @@ public class AccelService extends Service
     	
     	return mSleepInterval;
     }
+
+
+    private long adjustWarmupInterval()
+    {
+
+        long interval, curInterval = -1;
+
+        for (ClientInfo client : mClientsMap.values())
+        {
+            interval = client.warmupInterval;
+            if (curInterval < interval)
+                curInterval = interval;
+        }
+
+        if (mWarmupInterval != curInterval)
+        {
+            mWarmupInterval = curInterval;
+            Log.v(TAG, "Warmup length set to " + mWarmupInterval);
+        }
+
+        return mWarmupInterval;
+    }
+
+    private long adjustReadInterval()
+    {
+        long interval, curInterval = -1;
+
+        for (ClientInfo client : mClientsMap.values())
+        {
+            interval = client.readInterval;
+            if (curInterval < interval)
+                curInterval = interval;
+        }
+
+        if (mReadInterval != curInterval)
+        {
+            mReadInterval = curInterval;
+            Log.i(TAG, "Read interval changed to " + mReadInterval);
+        }
+        return mReadInterval;
+    }
     
     /*
      * Used internally to modify the sampling rate.
@@ -916,31 +1041,98 @@ public class AccelService extends Service
      * @return						final applied value
      * 
      */
-    private int changeRate(int rate)
+    private int adjustRate()
     {
-		switch (rate)
-		{
-		case SensorManager.SENSOR_DELAY_FASTEST:
-			mRate = SensorManager.SENSOR_DELAY_FASTEST;
-			break;
-		case SensorManager.SENSOR_DELAY_GAME:
-			mRate = SensorManager.SENSOR_DELAY_GAME;
-			break;
-		case SensorManager.SENSOR_DELAY_NORMAL:
-			mRate = SensorManager.SENSOR_DELAY_NORMAL;
-			break;
-		case SensorManager.SENSOR_DELAY_UI:
-			mRate = SensorManager.SENSOR_DELAY_UI;
-			break;
-		default:
-			mRate = SensorManager.SENSOR_DELAY_GAME;
-			break;
-		}
+        int rate, curRate = Integer.MAX_VALUE;
 
-        Log.i(TAG, "Changing rate to " + mRate);
-		
+        for (ClientInfo client : mClientsMap.values())
+        {
+            rate = client.rate;
+            if (curRate > rate)
+                curRate = rate;
+        }
+
+        if (mRate != curRate)
+        {
+            mRate = curRate;
+            Log.i(TAG, "Rate set to " + mRate);
+        }
 		return mRate;
     }
+
+
+    class ClientInfo
+    {
+        public int rate;
+        public long sleepInterval;
+        public long warmupInterval;
+        public long readInterval;
+
+
+        ClientInfo()
+        {
+            this.rate = DEFAULT_RATE;
+            this.sleepInterval = DEFAULT_SLEEP_INTERVAL;
+            this.readInterval = DEFAULT_READ_INTERVAL;
+            this.warmupInterval = DEFAULT_WARMUP_INTERVAL;
+        }
+
+
+        public void setReadInterval(long length)
+        {
+            if (length > 0)
+                readInterval = length;
+            else
+                warmupInterval = DEFAULT_WARMUP_INTERVAL;
+        }
+
+
+        public void setWarmupInterval(long length)
+        {
+            if (length >= 0)
+                warmupInterval = length;
+            else
+                warmupInterval = DEFAULT_WARMUP_INTERVAL;
+        }
+
+
+        public void setRate(int newrate)
+        {
+            switch (newrate)
+            {
+            case SensorManager.SENSOR_DELAY_FASTEST:
+                mRate = SensorManager.SENSOR_DELAY_FASTEST;
+                break;
+            case SensorManager.SENSOR_DELAY_GAME:
+                mRate = SensorManager.SENSOR_DELAY_GAME;
+                break;
+            case SensorManager.SENSOR_DELAY_NORMAL:
+                mRate = SensorManager.SENSOR_DELAY_NORMAL;
+                break;
+            case SensorManager.SENSOR_DELAY_UI:
+                mRate = SensorManager.SENSOR_DELAY_UI;
+                break;
+            default:
+                mRate = DEFAULT_RATE;
+                break;
+            }
+        }
+
+        public void setSleepInterval(long interval)
+        {
+            if (interval < 5 * ONE_SECOND)
+            {
+                this.sleepInterval = 5 * ONE_SECOND;
+            }
+            else
+            {
+                mSleepInterval = interval;
+            }
+        }
+
+    }
+
+
 
 
     class AccelCounter
