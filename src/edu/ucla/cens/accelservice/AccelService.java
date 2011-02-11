@@ -673,10 +673,11 @@ public class AccelService extends Service
             	if (mSensorRunning)
             	{
             		// Debug
-            		Log.v(TAG, "Turning off the sensor");
+            		/*Log.v(TAG, "Turning off the sensor");
                     Log.v(TAG, "Recorded " 
                             + mTempForceList.size()
                             + " samples.");
+                    */
 
            		
             		mSensorManager.unregisterListener(mSensorListener, 
@@ -693,9 +694,11 @@ public class AccelService extends Service
         			mLastListZ = mTempListZ;
 
 
+                    /* Debug
                     Log.v(TAG, "Last force value: " 
                             + mLastForceList.get(
                                 mLastForceList.size() - 1));
+                    */
  
 
             	}
@@ -812,8 +815,6 @@ public class AccelService extends Service
 
             if (action != null)
             {
-                Log.i(TAG, "Received action: " + action);
-
                 if (action.equals(ACCEL_ALARM_ACTION))
                 {
                     if (!mCpuLock.isHeld())
@@ -825,7 +826,6 @@ public class AccelService extends Service
             }
         }
         super.onStart(intent, startId);
-        Log.i(TAG, "onStart");
     }
 	
     /*
