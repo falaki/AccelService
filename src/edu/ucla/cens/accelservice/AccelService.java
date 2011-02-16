@@ -546,6 +546,16 @@ public class AccelService extends Service
 		  {
 		      return mLastTS;
 		  }
+
+          /**
+           * Returns true if the service is running.
+           *
+           * @return             running state of the service
+           */
+          public boolean isRunning()
+          {
+              return mIsRunning;
+          }
 		 
           /**
            * Starts the accelerometer service.

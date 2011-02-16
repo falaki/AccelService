@@ -2,6 +2,15 @@ package edu.ucla.cens.accelservice;
 
 interface IAccelService
 {
+
+    /**
+     * Returns true if the service is running.
+     * 
+     * @return                  current state of the service
+     */
+    boolean isRunning();
+    
+
 	/**
 	 * Starts the accelerometer service.
      *
