@@ -819,6 +819,12 @@ public class AccelService extends Service
      
         }
 
+        if (!Log.isConnected())
+        {
+            bindService(new Intent(ISystemLog.class.getName()),
+                    Log.SystemLogConnection, Context.BIND_AUTO_CREATE);
+        }
+
         if (intent != null)
         {
             String action = intent.getAction();
