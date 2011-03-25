@@ -1136,9 +1136,9 @@ public class AccelService extends Service
 
         public void setSleepInterval(long interval)
         {
-            if (interval < 5 * ONE_SECOND)
+            if (interval < ONE_SECOND)
             {
-                this.sleepInterval = 5 * ONE_SECOND;
+                this.sleepInterval =  DEFAULT_SLEEP_INTERVAL;
             }
             else
             {
