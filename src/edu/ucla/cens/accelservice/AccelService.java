@@ -494,9 +494,12 @@ public class AccelService extends Service
 		 * 
 		 * @return				latest recorded force vector
 		 */
-		public synchronized List<Double> getLastForce()
+		public List<Double> getLastForce()
 		{
-		    return mLastForceList; 
+            synchronized(mLastListX)
+            {
+		        return mLastForceList; 
+            }
 		}
 		 
 		 /**
@@ -505,9 +508,13 @@ public class AccelService extends Service
 		  *
 		  * @return				latest recorded values
 		  */
-		 public synchronized List<Double> getLastXValues()
+		 public List<Double> getLastXValues()
 		 {
-		     return mLastListX;
+
+            synchronized(mLastListX)
+            {
+                return mLastListX;
+            }
 		 }
 
 
@@ -517,9 +524,12 @@ public class AccelService extends Service
 		  *
 		  * @return				latest recorded values
 		  */
-		 public synchronized List<Double> getLastYValues()
+		 public List<Double> getLastYValues()
 		 {
-		     return mLastListY;
+            synchronized(mLastListX)
+            {
+		        return mLastListY;
+            }
 		 }
 
 		 /**
@@ -528,9 +538,12 @@ public class AccelService extends Service
 		  *
 		  * @return				latest recorded values
 		  */
-		 public synchronized List<Double> getLastZValues()
-		 {
-		     return mLastListZ;
+		 public List<Double> getLastZValues()
+		 { 
+             synchronized(mLastListX)
+             {
+		        return mLastListZ;
+             }
 		 }
 
 
@@ -544,7 +557,10 @@ public class AccelService extends Service
 		   */
 		  public long getLastTimeStamp()
 		  {
-		      return mLastTS;
+             synchronized(mLastListX)
+             {
+		        return mLastTS;
+             }
 		  }
 
           /**
@@ -667,7 +683,7 @@ public class AccelService extends Service
     private final Handler mHandler = new Handler()
     {
         @Override
-        public synchronized void handleMessage(Message msg)
+        public void handleMessage(Message msg)
         {
             // Discard the message if the service is not 
             // supposed to be running.
@@ -698,10 +714,13 @@ public class AccelService extends Service
                     mRecordSensor = false;
             		
             		// Time to copy temp lists to last lists
-        			mLastForceList = mTempForceList;
-        			mLastListX = mTempListX;
-        			mLastListY = mTempListY;
-        			mLastListZ = mTempListZ;
+                    synchronized (mLastListX)
+                    {
+                        mLastForceList = mTempForceList;
+                        mLastListX = mTempListX;
+                        mLastListY = mTempListY;
+                        mLastListZ = mTempListZ;
+                    }
 
 
                     /* Debug
@@ -946,10 +965,13 @@ public class AccelService extends Service
         mWarmupInterval = DEFAULT_WARMUP_INTERVAL;
 
 
-        mLastForceList = null;
-        mLastListX = null;
-        mLastListY = null;
-        mLastListZ = null;
+        synchronized(mLastListX)
+        {
+            mLastForceList = null;
+            mLastListX = null;
+            mLastListY = null;
+            mLastListZ = null;
+        }
 
 
     	
