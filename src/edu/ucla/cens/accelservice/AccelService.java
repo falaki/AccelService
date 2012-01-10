@@ -35,7 +35,7 @@ public class AccelService extends Service
 
     private static final String APP_NAME = "AccelService";
 
-    private static final String ACCEL_UNIT_NAME = "Accel";
+    private static final String ACCEL_UNIT_NAME = "accel";
 	
 	/** Timer message types */
 	private static final int SLEEP_TIMER_MSG = 1;
@@ -585,15 +585,36 @@ public class AccelService extends Service
               Log.i(TAG, "Received start() from " 
                       + callerName);
 
+              if (mClientsMap != null)
+                  Log.i(TAG, "Current clients are: " +
+                          mClientsMap.keySet());
+              else
+                  Log.i(TAG, "ClientsMap is null");
+
+
+
+
               if (!mClientsMap.containsKey(callerName))
                   mClientsMap.put(callerName, new ClientInfo());
+
+
+
+              if (mClientsMap != null)
+                  Log.i(TAG, "New clients are: " +
+                          mClientsMap.keySet());
+              else
+                  Log.i(TAG, "ClientsMap is null");
+
+
 
               int clientCount = mClientsMap.size();
 
 
               if ((clientCount == 1) && (!mIsRunning))
+              //if (!mIsRunning)
               {
                   Log.i(TAG, "Starting the service");
+                  mAlarmManager.cancel(mAccelSender);
 
                   mAlarmManager.setRepeating(
                           AlarmManager.ELAPSED_REALTIME_WAKEUP,
@@ -601,6 +622,7 @@ public class AccelService extends Service
                           mSleepInterval, 
                           mAccelSender);
                   mIsRunning = true;
+                  mSensorRunning = false;
               }
               else
               {
@@ -690,7 +712,7 @@ public class AccelService extends Service
             if (!mIsRunning)
             {
                 Log.w(TAG, "Discarding internal message.");
-                mAlarmManager.cancel(mAccelSender);
+                //mAlarmManager.cancel(mAccelSender);
                 return;
             }
 
@@ -822,6 +844,10 @@ public class AccelService extends Service
             }
 
         }
+        else
+        {
+            Log.i(TAG, "Sensor is already recording.");
+        }
 
 
     }
@@ -830,6 +856,7 @@ public class AccelService extends Service
     @Override
     public void onStart(Intent intent, int startId)
     {
+        //Log.i(TAG, "Received onStart() call");
         if (!mPowerMonitorConnected)
         {
             Log.i(TAG, "Rebinding to PowerMonitor");
@@ -847,11 +874,14 @@ public class AccelService extends Service
         if (intent != null)
         {
             String action = intent.getAction();
+            //Log.i(TAG, "Intent is not null.");
 
             if (action != null)
             {
+                //Log.i(TAG, "Action is not null.");
                 if (action.equals(ACCEL_ALARM_ACTION))
                 {
+                    //Log.i(TAG, "ACCEL_ALARM_ACTION it is.");
                     if (!mCpuLock.isHeld())
                         mCpuLock.acquire(); // Released after sensor
                                             // reading is over
@@ -885,6 +915,8 @@ public class AccelService extends Service
  
 
         Log.i(TAG, "onCreate");
+
+        mSensorRunning = false;
 
         mClientsMap = new Hashtable<String, ClientInfo>();
      
@@ -963,8 +995,15 @@ public class AccelService extends Service
     	mReadInterval = DEFAULT_READ_INTERVAL;
 
         mWarmupInterval = DEFAULT_WARMUP_INTERVAL;
+            
+
+        mLastForceList = new ArrayList<Double>();
+        mLastListX = new ArrayList<Double>();
+        mLastListY = new ArrayList<Double>();
+        mLastListZ = new ArrayList<Double>();
 
 
+        /*
         synchronized(mLastListX)
         {
             mLastForceList = null;
@@ -972,6 +1011,7 @@ public class AccelService extends Service
             mLastListY = null;
             mLastListZ = null;
         }
+        */
 
 
     	
