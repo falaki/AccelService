@@ -82,7 +82,7 @@ public class AccelService extends Service
 	private boolean mJustStarted = true;
 	
 	/** Boolean variable used to duty-cycle the sensor */
-	private boolean mSensorRunning = false;
+	//private boolean mSensorRunning = false;
 
     /** Boolean variable set to read the sensor after warm-up */
     private boolean mRecordSensor = false;
@@ -154,6 +154,8 @@ public class AccelService extends Service
             ArrayList<Double> totalWork = new ArrayList<Double>(1);
 
             totalWork.add(mAccelCounter.getCount());
+
+            Log.i(TAG, "Returning " + totalWork + " in getWork()");
 
             return totalWork;
         }
@@ -281,7 +283,6 @@ public class AccelService extends Service
 		 */
 		public void onAccuracyChanged(Sensor sensor, int accuracy) 
 		{
-			/*
 			String accuracyStr = "Unkown";
 			
 			switch (accuracy)
@@ -301,7 +302,6 @@ public class AccelService extends Service
 			}
 			Log.i(TAG, "Accuracy changed to " + 
                 accuracyStr + " (" + accuracy + ")");
-			*/
 		}
 	};
 	
@@ -622,7 +622,7 @@ public class AccelService extends Service
                           mSleepInterval, 
                           mAccelSender);
                   mIsRunning = true;
-                  mSensorRunning = false;
+                  //mSensorRunning = false;
               }
               else
               {
@@ -665,7 +665,7 @@ public class AccelService extends Service
                          Sensor.TYPE_ACCELEROMETER));
                  
                   
-                 mSensorRunning = false;
+                 //mSensorRunning = false;
                  mIsRunning = false;
               }
               else
@@ -718,80 +718,38 @@ public class AccelService extends Service
 
             if (msg.what == SLEEP_TIMER_MSG)
             {
-            	if (mSensorRunning)
-            	{
-            		// Debug
-            		/*Log.v(TAG, "Turning off the sensor");
-                    Log.v(TAG, "Recorded " 
-                            + mTempForceList.size()
-                            + " samples.");
-                    */
-
-           		
-            		mSensorManager.unregisterListener(mSensorListener, 
-            				mSensorManager.getDefaultSensor(
-                                Sensor.TYPE_ACCELEROMETER));
-            		
-            		mSensorRunning = false;
-                    mRecordSensor = false;
-            		
-            		// Time to copy temp lists to last lists
-                    synchronized (mLastListX)
-                    {
-                        mLastForceList = mTempForceList;
-                        mLastListX = mTempListX;
-                        mLastListY = mTempListY;
-                        mLastListZ = mTempListZ;
-                    }
+            	//if (mSensorRunning)
+            	//{
+                Log.v(TAG, "Turning off the sensor");
+            
+                mSensorManager.unregisterListener(mSensorListener, 
+                        mSensorManager.getDefaultSensor(
+                            Sensor.TYPE_ACCELEROMETER));
+                
+                //mSensorRunning = false;
+                mRecordSensor = false;
+                
+                // Time to copy temp lists to last lists
+                synchronized (mLastListX)
+                {
+                    mLastForceList = mTempForceList;
+                    mLastListX = mTempListX;
+                    mLastListY = mTempListY;
+                    mLastListZ = mTempListZ;
+                }
 
 
-                    /* Debug
-                    Log.v(TAG, "Last force value: " 
-                            + mLastForceList.get(
-                                mLastForceList.size() - 1));
-                    */
- 
-
-            	}
+            	//}
+                //else
+                //{
+                //    Log.v(TAG, "Time to turn off sensor,"
+                //            + " but running flag is not set.");
+                //}
 
                 if (mCpuLock.isHeld())
                     mCpuLock.release();
 
             }
-            /* Replaced by the Alarm mechanism 
-            else if (msg.what == WARMUP_TIMER_MSG)
-            {
-            	if (!mSensorRunning)
-            	{
-            		Log.v(TAG, "Starting to warm up the sensor for "
-                            + mWarmupInterval
-                            + " milliseconds");
-
-                    if (mAccelCounter.hasBudget())
-                    {
-                        mSensorManager.registerListener(mSensorListener, 
-                                mSensorManager.getDefaultSensor(
-                                    Sensor.TYPE_ACCELEROMETER), 
-                                mRate);
-                    }
-                    else
-                    {
-                        Log.i(TAG, "Ran out of budget. Did not turn" +
-                                "on the sensor");
-                    }
-
-                    mHandler.sendMessageAtTime(
-                            mHandler.obtainMessage(READ_TIMER_MSG),
-                            SystemClock.uptimeMillis() + mWarmupInterval);
-
-
-            	}
-
-                mSensorRunning = true;
-                mRecordSensor = false;
-
-            }
-            */
             else if (msg.what == READ_TIMER_MSG)
             {             
                 // Debug
@@ -816,38 +774,38 @@ public class AccelService extends Service
     private void sensorCycle()
     {
 
-        if (!mSensorRunning)
+        //if (!mSensorRunning)
+        //{
+        Log.v(TAG, "Starting to warm up the sensor for "
+                + mWarmupInterval
+                + " milliseconds");
+
+        if (mAccelCounter.hasBudget())
         {
-            Log.v(TAG, "Starting to warm up the sensor for "
-                    + mWarmupInterval
-                    + " milliseconds");
+            mSensorManager.registerListener(mSensorListener, 
+                    mSensorManager.getDefaultSensor(
+                        Sensor.TYPE_ACCELEROMETER), 
+                    mRate);
 
-            if (mAccelCounter.hasBudget())
-            {
-                mSensorManager.registerListener(mSensorListener, 
-                        mSensorManager.getDefaultSensor(
-                            Sensor.TYPE_ACCELEROMETER), 
-                        mRate);
+            mHandler.sendMessageAtTime(
+                    mHandler.obtainMessage(READ_TIMER_MSG),
+                    SystemClock.uptimeMillis() + mWarmupInterval);
 
-                mHandler.sendMessageAtTime(
-                        mHandler.obtainMessage(READ_TIMER_MSG),
-                        SystemClock.uptimeMillis() + mWarmupInterval);
-
-                mSensorRunning = true;
-                mRecordSensor = false;
-
-            }
-            else
-            {
-                Log.i(TAG, "Ran out of budget. Did not turn " +
-                        "on the sensor.");
-            }
+            //mSensorRunning = true;
+            mRecordSensor = false;
 
         }
         else
         {
-            Log.i(TAG, "Sensor is already recording.");
+            Log.i(TAG, "Ran out of budget. Did not turn " +
+                    "on the sensor.");
         }
+
+        //}
+        //else
+        //{
+        //    Log.i(TAG, "Sensor is already recording.");
+        //}
 
 
     }
@@ -916,7 +874,7 @@ public class AccelService extends Service
 
         Log.i(TAG, "onCreate");
 
-        mSensorRunning = false;
+        //mSensorRunning = false;
 
         mClientsMap = new Hashtable<String, ClientInfo>();
      
@@ -967,15 +925,15 @@ public class AccelService extends Service
                Sensor.TYPE_ACCELEROMETER));
         
         
-        mSensorRunning = false;
+        //mSensorRunning = false;
 
 
     	super.onDestroy();
 
         unbindService(Log.SystemLogConnection);
     	
-    	if (mSensorRunning)
-    		mSensorManager.unregisterListener(mSensorListener);
+    	//if (mSensorRunning)
+        mSensorManager.unregisterListener(mSensorListener);
     	
     }
     
